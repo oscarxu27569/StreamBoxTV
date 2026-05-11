@@ -12,7 +12,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -28,6 +32,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -42,9 +48,35 @@ fun PlayerScreen(
     onNext: () -> Unit,
 ) {
     val context = LocalContext.current
+    var statusText by remember { mutableStateOf("正在缓冲...") }
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
             playWhenReady = true
+        }
+    }
+
+    LaunchedEffect(channel.id) {
+        statusText = "正在缓冲..."
+    }
+
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                statusText = when (playbackState) {
+                    Player.STATE_BUFFERING -> "正在缓冲..."
+                    Player.STATE_READY -> ""
+                    Player.STATE_ENDED -> "直播已结束或源已断开"
+                    else -> statusText
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                statusText = "播放失败：${error.errorCodeName}"
+            }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
         }
     }
 
@@ -120,6 +152,9 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize(),
         )
         NowPlayingOverlay(channel = channel)
+        if (statusText.isNotBlank()) {
+            PlaybackStatusOverlay(statusText = statusText)
+        }
     }
 }
 
@@ -141,6 +176,28 @@ private fun NowPlayingOverlay(channel: Channel) {
         BasicText(
             text = channel.group,
             style = TextStyle(color = Color(0xFFB4C7CC), fontSize = 16.sp),
+        )
+    }
+}
+
+@Composable
+private fun PlaybackStatusOverlay(statusText: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = 60.dp),
+        contentAlignment = androidx.compose.ui.Alignment.BottomCenter,
+    ) {
+        BasicText(
+            text = statusText,
+            style = TextStyle(
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+            modifier = Modifier
+                .background(Color(0xAA000000))
+                .padding(horizontal = 22.dp, vertical = 12.dp),
         )
     }
 }
