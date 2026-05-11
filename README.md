@@ -17,6 +17,18 @@
 - 支持添加自定义 HTTP/HTTPS M3U 订阅。
 - 解析阶段过滤危险协议，只接受 `http`、`https`、`rtsp`、`rtmp`、`udp` 类型的播放地址。
 
+## 盒子兼容性
+
+最低支持 Android 6.0。应用同时声明普通 Android launcher 和 Android TV launcher，因此大多数可安装第三方 APK 的电视盒子都可以尝试安装。
+
+部分盒子需要在系统设置里允许文件管理器安装未知来源 APK。
+
+## 中国大陆网络说明
+
+内置的是订阅 URL，不是把完整频道列表写死进 APK。首次打开时，App 会访问 GitHub raw 地址下载 M3U 文本。
+
+在中国大陆网络环境下，`raw.githubusercontent.com` 可能无法访问或速度不稳定。如果打开后加载失败，可以在 App 里添加你自己的可访问 M3U 订阅地址，或把订阅文件放到局域网/NAS/自己的服务器上，再添加对应的 HTTP 地址。
+
 ## 安全策略
 
 这个 App 只把 GitHub 订阅当作纯文本 M3U 读取：
