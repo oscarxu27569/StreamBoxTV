@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -173,7 +174,7 @@ private fun ChannelList(
 }
 
 @Composable
-private fun DetailPanel(
+private fun RowScope.DetailPanel(
     state: TvUiState,
     onRefresh: () -> Unit,
     onAddSource: (String) -> Unit,
