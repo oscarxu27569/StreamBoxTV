@@ -6,6 +6,8 @@
 
 - 内置 `big-mouth-cn/tv` 可用订阅：
   `https://raw.githubusercontent.com/big-mouth-cn/tv/main/iptv-ok.m3u`
+- 内置国内备用订阅：
+  `https://gh-proxy.com/https://raw.githubusercontent.com/big-mouth-cn/tv/main/iptv-ok.m3u`
 - 启动后自动下载并解析 M3U 频道。
 - 频道分组、频道列表、详情面板。
 - 内置 Media3 / ExoPlayer 播放器。
@@ -25,7 +27,7 @@
 
 ## 中国大陆网络说明
 
-内置的是订阅 URL，不是把完整频道列表写死进 APK。首次打开时，App 会访问 GitHub raw 地址下载 M3U 文本。
+内置的是订阅 URL，不是把完整频道列表写死进 APK。首次打开时，App 会访问 GitHub raw 地址和国内备用 proxy 地址下载 M3U 文本。
 
 在中国大陆网络环境下，`raw.githubusercontent.com` 可能无法访问或速度不稳定。如果打开后加载失败，可以在 App 里添加你自己的可访问 M3U 订阅地址，或把订阅文件放到局域网/NAS/自己的服务器上，再添加对应的 HTTP 地址。
 

@@ -16,7 +16,7 @@ class SourceStore(context: Context) {
             }
             .toList()
 
-        return listOf(BuiltInSources.defaultSubscription) + custom
+        return BuiltInSources.defaultSubscriptions + custom
     }
 
     fun add(url: String): Result<Unit> {
