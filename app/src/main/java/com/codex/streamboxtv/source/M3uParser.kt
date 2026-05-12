@@ -26,8 +26,8 @@ class M3uParser {
                             name = name,
                             group = info?.groupTitle?.takeIf { it.isNotBlank() } ?: "未分组",
                             logoUrl = info?.logoUrl?.takeIf { SafeStreamUrl.isAllowed(it) },
-                            streamUrl = line,
-                            sourceName = source.name,
+                            streamUrls = listOf(line),
+                            sourceNames = listOf(source.name),
                         )
                         pendingInfo = null
                     }

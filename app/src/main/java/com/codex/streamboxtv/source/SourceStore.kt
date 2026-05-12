@@ -25,8 +25,8 @@ class SourceStore(context: Context) {
             return Result.failure(IllegalArgumentException("订阅地址只支持 http 或 https"))
         }
 
-        val current = list().drop(1)
-        if (current.any { it.url == value } || BuiltInSources.defaultSubscription.url == value) {
+        val current = list().drop(BuiltInSources.defaultSubscriptions.size)
+        if (current.any { it.url == value } || BuiltInSources.defaultSubscriptions.any { it.url == value }) {
             return Result.success(Unit)
         }
 
@@ -40,7 +40,59 @@ class SourceStore(context: Context) {
         return Result.success(Unit)
     }
 
+    fun addImportedFile(uri: String): Result<Unit> {
+        val value = uri.trim()
+        if (!value.startsWith("content://")) {
+            return Result.failure(IllegalArgumentException("只能导入系统文件选择器返回的文件"))
+        }
+
+        val current = list().drop(BuiltInSources.defaultSubscriptions.size)
+        if (current.any { it.url == value }) return Result.success(Unit)
+
+        val next = current + SourceSubscription(
+            name = "本地订阅文件 ${current.size + 1}",
+            url = value,
+        )
+        prefs.edit()
+            .putString(KEY_CUSTOM_SOURCES, next.joinToString("\n") { "${it.name}\t${it.url}" })
+            .apply()
+        return Result.success(Unit)
+    }
+
+    fun loadLastChannelId(): String? {
+        return prefs.getString(KEY_LAST_CHANNEL_ID, null)
+    }
+
+    fun saveLastChannelId(channelId: String) {
+        prefs.edit()
+            .putString(KEY_LAST_CHANNEL_ID, channelId)
+            .apply()
+    }
+
+    fun hiddenChannelIds(): Set<String> {
+        return prefs.getStringSet(KEY_HIDDEN_CHANNEL_IDS, emptySet()).orEmpty()
+    }
+
+    fun hiddenGroups(): Set<String> {
+        return prefs.getStringSet(KEY_HIDDEN_GROUPS, emptySet()).orEmpty()
+    }
+
+    fun hideChannel(channelId: String) {
+        prefs.edit()
+            .putStringSet(KEY_HIDDEN_CHANNEL_IDS, hiddenChannelIds() + channelId)
+            .apply()
+    }
+
+    fun hideGroup(group: String) {
+        prefs.edit()
+            .putStringSet(KEY_HIDDEN_GROUPS, hiddenGroups() + group)
+            .apply()
+    }
+
     private companion object {
         const val KEY_CUSTOM_SOURCES = "custom_sources"
+        const val KEY_LAST_CHANNEL_ID = "last_channel_id"
+        const val KEY_HIDDEN_CHANNEL_IDS = "hidden_channel_ids"
+        const val KEY_HIDDEN_GROUPS = "hidden_groups"
     }
 }

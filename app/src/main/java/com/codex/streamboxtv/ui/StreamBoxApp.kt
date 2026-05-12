@@ -21,10 +21,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +35,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -49,43 +53,359 @@ import com.codex.streamboxtv.data.Channel
 import com.codex.streamboxtv.player.PlayerScreen
 
 @Composable
-fun StreamBoxApp(viewModel: ChannelViewModel) {
+fun StreamBoxApp(
+    viewModel: ChannelViewModel,
+    onImportSourceFile: () -> Unit,
+) {
     val state by viewModel.state.collectAsState()
+    var showAddSource by remember { mutableStateOf(false) }
+    var sourceUrl by remember { mutableStateOf("") }
+    var showMenu by remember { mutableStateOf(false) }
+    var showSourcePicker by remember { mutableStateOf(false) }
+    var menuLayer by remember { mutableStateOf(MenuLayer.Groups) }
+    var addSourceSelected by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<DeleteTarget?>(null) }
+    var deleteConfirmed by remember { mutableStateOf(false) }
+    var okPressedAt by remember { mutableStateOf<Long?>(null) }
+    val focusRequester = remember { FocusRequester() }
 
-    BackHandler(enabled = state.playingChannel != null) {
-        viewModel.closePlayer()
+    LaunchedEffect(showMenu, showAddSource, state.playingChannel?.id) {
+        if (!showAddSource) {
+            focusRequester.requestFocus()
+        }
+    }
+
+    BackHandler(enabled = showAddSource) {
+        showAddSource = false
+    }
+
+    BackHandler(enabled = showSourcePicker && !showAddSource) {
+        showSourcePicker = false
+    }
+
+    BackHandler(enabled = showMenu && !showAddSource && !showSourcePicker) {
+        if (menuLayer == MenuLayer.Channels) {
+            menuLayer = MenuLayer.Groups
+        } else {
+            showMenu = false
+        }
+    }
+
+    BackHandler(enabled = state.playingChannel != null && !showMenu && !showAddSource && !showSourcePicker) {
+        showMenu = true
+        menuLayer = MenuLayer.Groups
+        addSourceSelected = false
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(AppColors.background),
-    ) {
-        ChannelBrowser(
-            state = state,
-            onRefresh = viewModel::refresh,
-            onAddSource = viewModel::addSource,
-            onGroupSelected = viewModel::selectGroup,
-            onChannelSelected = viewModel::selectChannel,
-            onChannelPlayed = viewModel::play,
-        )
+            .background(AppColors.background)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (showAddSource) {
+                    return@onPreviewKeyEvent false
+                }
+                val isOkKey = event.key == Key.DirectionCenter ||
+                    event.key == Key.Enter ||
+                    event.key == Key.NumPadEnter
 
+                if (showSourcePicker) {
+                    when (event.key) {
+                        Key.DirectionUp -> {
+                            if (event.type == KeyEventType.KeyDown) viewModel.selectSourceOffset(-1)
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            if (event.type == KeyEventType.KeyDown) viewModel.selectSourceOffset(1)
+                            true
+                        }
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                            if (event.type == KeyEventType.KeyUp) {
+                                viewModel.playSelectedSource()
+                                showSourcePicker = false
+                            }
+                            true
+                        }
+                        Key.DirectionLeft, Key.Back, Key.Menu -> {
+                            if (event.type == KeyEventType.KeyDown) showSourcePicker = false
+                            true
+                        }
+                        else -> true
+                    }
+                } else pendingDelete?.let { target ->
+                    when (event.key) {
+                        Key.DirectionLeft, Key.DirectionRight -> {
+                            if (event.type == KeyEventType.KeyDown) {
+                                deleteConfirmed = !deleteConfirmed
+                            }
+                            true
+                        }
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                            if (event.type != KeyEventType.KeyUp) return@onPreviewKeyEvent true
+                            if (deleteConfirmed) {
+                                when (target) {
+                                    is DeleteTarget.Group -> viewModel.deleteSelectedGroup()
+                                    is DeleteTarget.Channel -> viewModel.deleteSelectedChannel()
+                                }
+                            }
+                            pendingDelete = null
+                            deleteConfirmed = false
+                            true
+                        }
+                        Key.Back, Key.Menu -> {
+                            if (event.type == KeyEventType.KeyDown) {
+                                pendingDelete = null
+                                deleteConfirmed = false
+                            }
+                            true
+                        }
+                        else -> true
+                    }
+                } ?: run {
+                if (isOkKey) {
+                    if (event.type == KeyEventType.KeyDown) {
+                        if (okPressedAt == null) okPressedAt = System.currentTimeMillis()
+                        return@onPreviewKeyEvent true
+                    }
+
+                    if (event.type == KeyEventType.KeyUp) {
+                        val heldFor = System.currentTimeMillis() - (okPressedAt ?: System.currentTimeMillis())
+                        okPressedAt = null
+                        if (showMenu || state.playingChannel == null) {
+                            if (heldFor >= 650) {
+                                pendingDelete = when {
+                                    menuLayer == MenuLayer.Groups && !addSourceSelected && state.selectedGroup != "全部" ->
+                                        DeleteTarget.Group(state.selectedGroup)
+                                    menuLayer == MenuLayer.Channels && state.selectedChannel != null ->
+                                        DeleteTarget.Channel(state.selectedChannel!!.name)
+                                    else -> null
+                                }
+                                deleteConfirmed = false
+                                return@onPreviewKeyEvent pendingDelete != null
+                            }
+
+                            if (menuLayer == MenuLayer.Groups) {
+                                if (addSourceSelected) {
+                                    showAddSource = true
+                                } else {
+                                    menuLayer = MenuLayer.Channels
+                                }
+                            } else if (menuLayer == MenuLayer.Channels) {
+                                state.selectedChannel?.let {
+                                    viewModel.play(it, state.selectedSourceIndex)
+                                    showMenu = false
+                                    menuLayer = MenuLayer.Groups
+                                    addSourceSelected = false
+                                }
+                            } else {
+                                state.selectedChannel?.let {
+                                    viewModel.play(it, state.selectedSourceIndex)
+                                    showMenu = false
+                                    menuLayer = MenuLayer.Groups
+                                    addSourceSelected = false
+                                }
+                            }
+                            return@onPreviewKeyEvent true
+                        }
+                    }
+                    return@onPreviewKeyEvent true
+                }
+
+                if (event.type != KeyEventType.KeyDown) {
+                    return@onPreviewKeyEvent false
+                }
+
+                if (showMenu || state.playingChannel == null) {
+                    when (event.key) {
+                        Key.DirectionUp, Key.DirectionLeft -> {
+                            if (menuLayer == MenuLayer.Groups) {
+                                if (event.key == Key.DirectionUp) {
+                                    if (addSourceSelected) {
+                                        addSourceSelected = false
+                                    } else {
+                                        viewModel.selectGroupOffset(-1)
+                                    }
+                                }
+                            } else {
+                                if (menuLayer == MenuLayer.Channels && event.key == Key.DirectionUp) {
+                                    viewModel.selectChannelOffset(-1)
+                                } else if (menuLayer == MenuLayer.Sources && event.key == Key.DirectionUp) {
+                                    viewModel.selectSourceOffset(-1)
+                                } else {
+                                    menuLayer = MenuLayer.Groups
+                                }
+                            }
+                            true
+                        }
+                        Key.DirectionDown, Key.DirectionRight -> {
+                            if (menuLayer == MenuLayer.Groups) {
+                                if (event.key == Key.DirectionRight) {
+                                    if (addSourceSelected) {
+                                        showAddSource = true
+                                    } else {
+                                        menuLayer = MenuLayer.Channels
+                                    }
+                                } else {
+                                    val isLastGroup = state.groups.indexOf(state.selectedGroup) == state.groups.lastIndex
+                                    if (isLastGroup || addSourceSelected) {
+                                        addSourceSelected = true
+                                    } else {
+                                        viewModel.selectGroupOffset(1)
+                                    }
+                                }
+                            } else {
+                                if (menuLayer == MenuLayer.Channels && event.key == Key.DirectionDown) {
+                                    viewModel.selectChannelOffset(1)
+                                } else if (menuLayer == MenuLayer.Channels && event.key == Key.DirectionRight) {
+                                    menuLayer = MenuLayer.Sources
+                                } else if (menuLayer == MenuLayer.Sources && event.key == Key.DirectionDown) {
+                                    viewModel.selectSourceOffset(1)
+                                }
+                            }
+                            true
+                        }
+                        Key.Back, Key.Menu -> {
+                            if (menuLayer == MenuLayer.Sources) {
+                                menuLayer = MenuLayer.Channels
+                                true
+                            } else if (menuLayer == MenuLayer.Channels) {
+                                menuLayer = MenuLayer.Groups
+                                true
+                            } else if (state.playingChannel != null) {
+                                showMenu = false
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        else -> false
+                    }
+                } else {
+                    when (event.key) {
+                        Key.DirectionUp -> {
+                            viewModel.playOffset(-1)
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            viewModel.playOffset(1)
+                            true
+                        }
+                        Key.DirectionRight -> {
+                            showSourcePicker = true
+                            true
+                        }
+                        Key.Back, Key.Menu -> {
+                            showMenu = true
+                            menuLayer = MenuLayer.Groups
+                            addSourceSelected = false
+                            true
+                        }
+                        else -> false
+                    }
+                }
+                }
+            },
+    ) {
         state.playingChannel?.let { channel ->
+            val streamUrl = channel.streamUrls.getOrNull(state.playingStreamIndex).orEmpty()
             PlayerScreen(
                 channel = channel,
-                onClose = viewModel::closePlayer,
+                streamUrl = streamUrl,
+                streamIndex = state.playingStreamIndex,
+                sourceCount = channel.streamUrls.size,
+                playbackMessage = state.playbackMessage,
+                onMenu = { showMenu = true },
+                onSources = { showSourcePicker = true },
                 onPrevious = { viewModel.playOffset(-1) },
                 onNext = { viewModel.playOffset(1) },
+                onPlaybackFailure = viewModel::handlePlaybackFailure,
+                onPlaybackReady = viewModel::handlePlaybackReady,
+            )
+        }
+
+        if (showMenu || state.playingChannel == null) {
+            ChannelBrowser(
+                state = state,
+                menuLayer = menuLayer,
+                addSourceSelected = addSourceSelected,
+                onRefresh = viewModel::refresh,
+                onShowAddSource = {
+                    addSourceSelected = true
+                    showAddSource = true
+                },
+                onGroupSelected = {
+                    addSourceSelected = false
+                    viewModel.selectGroup(it)
+                },
+                onChannelSelected = viewModel::selectChannel,
+                onChannelPlayed = {
+                    viewModel.play(it, state.selectedSourceIndex)
+                    showMenu = false
+                    menuLayer = MenuLayer.Groups
+                },
+            )
+        }
+
+        if (showAddSource) {
+            AddSourceOverlay(
+                value = sourceUrl,
+                onValueChanged = { sourceUrl = it },
+                onSubmit = {
+                    viewModel.addSource(sourceUrl)
+                    sourceUrl = ""
+                    showAddSource = false
+                },
+                onImportSourceFile = {
+                    showAddSource = false
+                    onImportSourceFile()
+                },
+                onClose = { showAddSource = false },
+            )
+        }
+
+        if (showSourcePicker) {
+            SourcePickerOverlay(
+                channel = state.playingChannel ?: state.selectedChannel,
+                selectedIndex = state.selectedSourceIndex,
+            )
+        }
+
+        pendingDelete?.let { target ->
+            DeleteConfirmOverlay(
+                title = when (target) {
+                    is DeleteTarget.Group -> "删除分类"
+                    is DeleteTarget.Channel -> "删除频道"
+                },
+                message = when (target) {
+                    is DeleteTarget.Group -> "确认删除「${target.name}」分类下的所有频道和源？"
+                    is DeleteTarget.Channel -> "确认删除「${target.name}」频道及其所有源？"
+                },
+                confirmSelected = deleteConfirmed,
             )
         }
     }
 }
 
+private enum class MenuLayer {
+    Groups,
+    Channels,
+    Sources,
+}
+
+private sealed interface DeleteTarget {
+    data class Group(val name: String) : DeleteTarget
+    data class Channel(val name: String) : DeleteTarget
+}
+
 @Composable
 private fun ChannelBrowser(
     state: TvUiState,
+    menuLayer: MenuLayer,
+    addSourceSelected: Boolean,
     onRefresh: () -> Unit,
-    onAddSource: (String) -> Unit,
+    onShowAddSource: () -> Unit,
     onGroupSelected: (String) -> Unit,
     onChannelSelected: (Channel) -> Unit,
     onChannelPlayed: (Channel) -> Unit,
@@ -93,23 +413,29 @@ private fun ChannelBrowser(
     Row(
         modifier = Modifier
             .fillMaxSize()
+            .background(AppColors.background.copy(alpha = 0.96f))
             .padding(horizontal = 40.dp, vertical = 28.dp),
         horizontalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         Sidebar(
             groups = state.groups,
             selectedGroup = state.selectedGroup,
+            active = menuLayer == MenuLayer.Groups,
+            addSourceSelected = addSourceSelected,
+            onShowAddSource = onShowAddSource,
             onGroupSelected = onGroupSelected,
         )
         ChannelList(
             state = state,
+            active = menuLayer == MenuLayer.Channels,
             onChannelSelected = onChannelSelected,
             onChannelPlayed = onChannelPlayed,
         )
         DetailPanel(
             state = state,
+            activeSources = menuLayer == MenuLayer.Sources,
             onRefresh = onRefresh,
-            onAddSource = onAddSource,
+            onShowAddSource = onShowAddSource,
             onChannelPlayed = onChannelPlayed,
         )
     }
@@ -119,8 +445,22 @@ private fun ChannelBrowser(
 private fun Sidebar(
     groups: List<String>,
     selectedGroup: String,
+    active: Boolean,
+    addSourceSelected: Boolean,
+    onShowAddSource: () -> Unit,
     onGroupSelected: (String) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+    val selectedIndex = if (addSourceSelected) {
+        groups.size
+    } else {
+        groups.indexOf(selectedGroup).coerceAtLeast(0)
+    }
+
+    LaunchedEffect(selectedIndex) {
+        listState.animateScrollToItem(selectedIndex)
+    }
+
     Column(
         modifier = Modifier
             .width(220.dp)
@@ -129,14 +469,24 @@ private fun Sidebar(
         Title("StreamBox TV")
         Spacer(Modifier.height(24.dp))
         LazyColumn(
+            state = listState,
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
             items(groups) { group ->
                 FocusableRow(
                     text = group,
-                    selected = group == selectedGroup,
+                    selected = !addSourceSelected && group == selectedGroup,
+                    active = active,
                     onClick = { onGroupSelected(group) },
+                )
+            }
+            item {
+                FocusableRow(
+                    text = "添加源 / 导入文件",
+                    selected = addSourceSelected,
+                    active = active,
+                    onClick = onShowAddSource,
                 )
             }
         }
@@ -146,9 +496,20 @@ private fun Sidebar(
 @Composable
 private fun ChannelList(
     state: TvUiState,
+    active: Boolean,
     onChannelSelected: (Channel) -> Unit,
     onChannelPlayed: (Channel) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+    val selectedIndex = state.visibleChannels.indexOfFirst { it.id == state.selectedChannelId }
+        .coerceAtLeast(0)
+
+    LaunchedEffect(state.selectedGroup, selectedIndex) {
+        if (state.visibleChannels.isNotEmpty()) {
+            listState.animateScrollToItem(selectedIndex)
+        }
+    }
+
     Column(
         modifier = Modifier
             .width(420.dp)
@@ -157,6 +518,7 @@ private fun ChannelList(
         SectionLabel("${state.selectedGroup}  ${state.visibleChannels.size}")
         Spacer(Modifier.height(16.dp))
         LazyColumn(
+            state = listState,
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
@@ -165,6 +527,7 @@ private fun ChannelList(
                     text = channel.name,
                     subtitle = channel.group,
                     selected = channel.id == state.selectedChannelId,
+                    active = active,
                     onFocus = { onChannelSelected(channel) },
                     onClick = { onChannelPlayed(channel) },
                 )
@@ -176,13 +539,12 @@ private fun ChannelList(
 @Composable
 private fun RowScope.DetailPanel(
     state: TvUiState,
+    activeSources: Boolean,
     onRefresh: () -> Unit,
-    onAddSource: (String) -> Unit,
+    onShowAddSource: () -> Unit,
     onChannelPlayed: (Channel) -> Unit,
 ) {
     val channel = state.selectedChannel
-    var showAddSource by remember { mutableStateOf(false) }
-    var sourceUrl by remember { mutableStateOf("") }
     Column(
         modifier = Modifier
             .fillMaxHeight()
@@ -218,7 +580,10 @@ private fun RowScope.DetailPanel(
         state.errorMessage?.let {
             BodyText(it, color = AppColors.warning)
             Spacer(Modifier.height(14.dp))
-            FocusableButton(text = "重新加载", onClick = onRefresh)
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                FocusableButton(text = "重新加载", onClick = onRefresh)
+                FocusableButton(text = "导入文件", onClick = onShowAddSource)
+            }
         }
         channel?.let {
             BodyText("分组：${it.group}")
@@ -226,25 +591,188 @@ private fun RowScope.DetailPanel(
             BodyText("来源：${it.sourceName}")
             Spacer(Modifier.height(8.dp))
             BodyText("订阅数：${state.sourceCount}")
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(14.dp))
+            SourceList(
+                channel = it,
+                selectedIndex = state.selectedSourceIndex,
+                active = activeSources,
+            )
+            Spacer(Modifier.height(16.dp))
             FocusableButton(text = "播放", onClick = { onChannelPlayed(it) })
             Spacer(Modifier.height(18.dp))
-            HintText("播放中：左右键切台，返回键退出")
+            HintText("频道层按右选择源，源层上下切源，OK 播放")
         }
         Spacer(Modifier.height(18.dp))
-        FocusableButton(text = "添加订阅", onClick = { showAddSource = !showAddSource })
-        if (showAddSource) {
-            Spacer(Modifier.height(14.dp))
+        FocusableButton(text = "添加订阅", onClick = onShowAddSource)
+    }
+}
+
+@Composable
+private fun AddSourceOverlay(
+    value: String,
+    onValueChanged: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onImportSourceFile: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xCC000000)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(760.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(AppColors.background)
+                .border(2.dp, AppColors.accent.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                .padding(28.dp),
+        ) {
+            Title("添加 M3U 订阅")
+            Spacer(Modifier.height(18.dp))
             SourceInput(
-                value = sourceUrl,
-                onValueChanged = { sourceUrl = it },
-                onSubmit = {
-                    onAddSource(sourceUrl)
-                    sourceUrl = ""
-                    showAddSource = false
-                },
+                value = value,
+                onValueChanged = onValueChanged,
+            )
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                FocusableButton(text = "保存", onClick = onSubmit)
+                FocusableButton(text = "导入文件", onClick = onImportSourceFile)
+                FocusableButton(text = "取消", onClick = onClose)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceList(
+    channel: Channel,
+    selectedIndex: Int,
+    active: Boolean,
+) {
+    val firstVisibleSource = when {
+        channel.streamUrls.size <= 5 -> 0
+        selectedIndex <= 2 -> 0
+        selectedIndex >= channel.streamUrls.lastIndex - 2 -> channel.streamUrls.size - 5
+        else -> selectedIndex - 2
+    }
+    val visibleSources = channel.streamUrls
+        .drop(firstVisibleSource)
+        .take(5)
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionLabel("播放源 ${selectedIndex + 1}/${channel.streamUrls.size}")
+        visibleSources.forEachIndexed { offset, _ ->
+            val index = firstVisibleSource + offset
+            FocusableRow(
+                text = "源 ${index + 1}",
+                subtitle = channel.sourceNames.getOrNull(index) ?: channel.sourceName,
+                selected = index == selectedIndex,
+                active = active,
+                modifier = Modifier.width(260.dp),
+                onClick = {},
             )
         }
+        if (firstVisibleSource > 0 || firstVisibleSource + visibleSources.size < channel.streamUrls.size) {
+            HintText("按上下查看更多源")
+        }
+    }
+}
+
+@Composable
+private fun SourcePickerOverlay(
+    channel: Channel?,
+    selectedIndex: Int,
+) {
+    if (channel == null) return
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0x99000000)),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(340.dp)
+                .fillMaxHeight()
+                .background(AppColors.background.copy(alpha = 0.96f))
+                .padding(horizontal = 24.dp, vertical = 34.dp),
+        ) {
+            Title("选择播放源")
+            Spacer(Modifier.height(8.dp))
+            BodyText(channel.name)
+            Spacer(Modifier.height(18.dp))
+            SourceList(
+                channel = channel,
+                selectedIndex = selectedIndex,
+                active = true,
+            )
+            Spacer(Modifier.height(18.dp))
+            HintText("上下选择，OK 切换，左/返回关闭")
+        }
+    }
+}
+
+@Composable
+private fun DeleteConfirmOverlay(
+    title: String,
+    message: String,
+    confirmSelected: Boolean,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xCC000000)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(640.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(AppColors.background)
+                .border(2.dp, AppColors.warning.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                .padding(28.dp),
+        ) {
+            Title(title)
+            Spacer(Modifier.height(16.dp))
+            BodyText(message)
+            Spacer(Modifier.height(22.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                DialogChoice(text = "删除", selected = confirmSelected, danger = true)
+                DialogChoice(text = "取消", selected = !confirmSelected, danger = false)
+            }
+            Spacer(Modifier.height(12.dp))
+            HintText("左右选择，OK 确认，返回取消")
+        }
+    }
+}
+
+@Composable
+private fun DialogChoice(
+    text: String,
+    selected: Boolean,
+    danger: Boolean,
+) {
+    val color = if (danger) AppColors.warning else AppColors.selected
+    Box(
+        modifier = Modifier
+            .width(160.dp)
+            .height(54.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) color.copy(alpha = 0.28f) else AppColors.panel)
+            .border(2.dp, if (selected) color else Color.Transparent, RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            text = text,
+            style = TextStyle(
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
     }
 }
 
@@ -252,7 +780,6 @@ private fun RowScope.DetailPanel(
 private fun SourceInput(
     value: String,
     onValueChanged: (String) -> Unit,
-    onSubmit: () -> Unit,
 ) {
     Column {
         BasicTextField(
@@ -268,8 +795,6 @@ private fun SourceInput(
                 .border(2.dp, AppColors.accent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                 .padding(horizontal = 14.dp, vertical = 13.dp),
         )
-        Spacer(Modifier.height(10.dp))
-        FocusableButton(text = "保存订阅", onClick = onSubmit)
         Spacer(Modifier.height(8.dp))
         HintText("支持 http/https 的 M3U 地址")
     }
@@ -281,19 +806,28 @@ private fun FocusableRow(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     selected: Boolean = false,
+    active: Boolean = true,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     val borderColor = when {
-        focused -> AppColors.accent
-        selected -> AppColors.selected
+        active && focused -> AppColors.accent
+        active && selected -> AppColors.selected
+        selected -> AppColors.inactiveSelected
         else -> Color.Transparent
     }
     val background = when {
-        focused -> AppColors.focused
-        selected -> AppColors.selected.copy(alpha = 0.22f)
+        active && focused -> AppColors.focused
+        active && selected -> AppColors.selected.copy(alpha = 0.30f)
+        selected -> AppColors.inactiveSelected.copy(alpha = 0.18f)
         else -> AppColors.panel
+    }
+    val textColor = when {
+        active && selected -> Color.White
+        selected -> AppColors.inactiveText
+        active -> Color.White
+        else -> AppColors.muted
     }
 
     Column(
@@ -317,7 +851,7 @@ private fun FocusableRow(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(
-                color = Color.White,
+                color = textColor,
                 fontSize = 20.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
             ),
@@ -328,7 +862,10 @@ private fun FocusableRow(
                 text = it,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = TextStyle(color = AppColors.muted, fontSize = 14.sp),
+                style = TextStyle(
+                    color = if (active) AppColors.muted else AppColors.inactiveText,
+                    fontSize = 14.sp,
+                ),
             )
         }
     }
@@ -396,5 +933,7 @@ object AppColors {
     val selected = Color(0xFF2ED3B7)
     val accent = Color(0xFF6EE7D8)
     val muted = Color(0xFF9CB3B9)
+    val inactiveSelected = Color(0xFF45676B)
+    val inactiveText = Color(0xFF749198)
     val warning = Color(0xFFFFC857)
 }

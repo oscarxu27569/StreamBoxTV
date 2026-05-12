@@ -5,6 +5,12 @@ data class Channel(
     val name: String,
     val group: String,
     val logoUrl: String?,
-    val streamUrl: String,
-    val sourceName: String,
-)
+    val streamUrls: List<String>,
+    val sourceNames: List<String>,
+) {
+    val streamUrl: String
+        get() = streamUrls.firstOrNull().orEmpty()
+
+    val sourceName: String
+        get() = sourceNames.distinct().joinToString(" / ")
+}
