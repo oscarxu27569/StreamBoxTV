@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -239,7 +240,24 @@ fun StreamBoxApp(
                 } ?: run {
                 if (isOkKey) {
                     if (event.type == KeyEventType.KeyDown) {
-                        if (okPressedAt == null) okPressedAt = System.currentTimeMillis()
+                        val now = System.currentTimeMillis()
+                        if (okPressedAt == null) {
+                            okPressedAt = now
+                        } else if (showMenu || state.playingChannel == null) {
+                            val heldFor = now - (okPressedAt ?: now)
+                            if (heldFor >= 650) {
+                                pendingDelete = when {
+                                    menuLayer == MenuLayer.Groups && !addSourceSelected && state.selectedGroup != "全部" ->
+                                        DeleteTarget.Group(state.selectedGroup)
+                                    menuLayer == MenuLayer.Channels && state.selectedChannel != null ->
+                                        DeleteTarget.Channel(state.selectedChannel!!.name)
+                                    else -> null
+                                }
+                                okPressedAt = null
+                                deleteConfirmed = false
+                                return@onPreviewKeyEvent pendingDelete != null
+                            }
+                        }
                         return@onPreviewKeyEvent true
                     }
 
@@ -268,7 +286,7 @@ fun StreamBoxApp(
                                 }
                             } else if (menuLayer == MenuLayer.Channels) {
                                 state.selectedChannel?.let {
-                                    viewModel.play(it, state.selectedSourceIndex)
+                                    viewModel.play(it, 0)
                                     showMenu = false
                                     menuLayer = MenuLayer.Groups
                                     addSourceSelected = false
@@ -293,36 +311,46 @@ fun StreamBoxApp(
 
                 if (showMenu || state.playingChannel == null) {
                     when (event.key) {
-                        Key.DirectionUp, Key.DirectionLeft -> {
-                            if (menuLayer == MenuLayer.Groups) {
-                                if (event.key == Key.DirectionUp) {
+                        Key.DirectionLeft -> {
+                            when (menuLayer) {
+                                MenuLayer.Groups -> Unit
+                                MenuLayer.Channels -> menuLayer = MenuLayer.Groups
+                                MenuLayer.Sources -> menuLayer = MenuLayer.Channels
+                            }
+                            true
+                        }
+                        Key.DirectionUp -> {
+                            when (menuLayer) {
+                                MenuLayer.Groups -> {
                                     if (addSourceSelected) {
                                         addSourceSelected = false
                                     } else {
                                         viewModel.selectGroupOffset(-1)
                                     }
                                 }
-                            } else {
-                                if (menuLayer == MenuLayer.Channels && event.key == Key.DirectionUp) {
-                                    viewModel.selectChannelOffset(-1)
-                                } else if (menuLayer == MenuLayer.Sources && event.key == Key.DirectionUp) {
-                                    viewModel.selectSourceOffset(-1)
-                                } else {
-                                    menuLayer = MenuLayer.Groups
-                                }
+                                MenuLayer.Channels -> viewModel.selectChannelOffset(-1)
+                                MenuLayer.Sources -> viewModel.selectSelectedChannelSourceOffset(-1)
                             }
                             true
                         }
-                        Key.DirectionDown, Key.DirectionRight -> {
-                            if (menuLayer == MenuLayer.Groups) {
-                                if (event.key == Key.DirectionRight) {
+                        Key.DirectionRight -> {
+                            when (menuLayer) {
+                                MenuLayer.Groups -> {
                                     if (addSourceSelected) {
                                         addSourceActionIndex = 0
                                         showAddSource = true
                                     } else {
                                         menuLayer = MenuLayer.Channels
                                     }
-                                } else {
+                                }
+                                MenuLayer.Channels -> menuLayer = MenuLayer.Sources
+                                MenuLayer.Sources -> Unit
+                            }
+                            true
+                        }
+                        Key.DirectionDown -> {
+                            when (menuLayer) {
+                                MenuLayer.Groups -> {
                                     val isLastGroup = state.groups.indexOf(state.selectedGroup) == state.groups.lastIndex
                                     if (isLastGroup || addSourceSelected) {
                                         addSourceSelected = true
@@ -330,14 +358,8 @@ fun StreamBoxApp(
                                         viewModel.selectGroupOffset(1)
                                     }
                                 }
-                            } else {
-                                if (menuLayer == MenuLayer.Channels && event.key == Key.DirectionDown) {
-                                    viewModel.selectChannelOffset(1)
-                                } else if (menuLayer == MenuLayer.Channels && event.key == Key.DirectionRight) {
-                                    menuLayer = MenuLayer.Sources
-                                } else if (menuLayer == MenuLayer.Sources && event.key == Key.DirectionDown) {
-                                    viewModel.selectSourceOffset(1)
-                                }
+                                MenuLayer.Channels -> viewModel.selectChannelOffset(1)
+                                MenuLayer.Sources -> viewModel.selectSelectedChannelSourceOffset(1)
                             }
                             true
                         }
@@ -430,7 +452,7 @@ fun StreamBoxApp(
                 },
                 onChannelSelected = viewModel::selectChannel,
                 onChannelPlayed = {
-                    viewModel.play(it, state.selectedSourceIndex)
+                    viewModel.play(it, 0)
                     showMenu = false
                     menuLayer = MenuLayer.Groups
                 },
@@ -571,7 +593,7 @@ private fun Sidebar(
     }
 
     LaunchedEffect(selectedIndex) {
-        listState.scrollToItem(selectedIndex)
+        listState.animateScrollToItem(selectedIndex)
     }
 
     Column(
@@ -619,7 +641,7 @@ private fun ChannelList(
 
     LaunchedEffect(state.selectedGroup, selectedIndex) {
         if (state.visibleChannels.isNotEmpty()) {
-            listState.scrollToItem(selectedIndex)
+            listState.animateScrollToItem(selectedIndex)
         }
     }
 
@@ -669,7 +691,7 @@ private fun RowScope.DetailPanel(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(230.dp)
+                .height(170.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(AppColors.panel),
             contentAlignment = Alignment.Center,
@@ -680,7 +702,7 @@ private fun RowScope.DetailPanel(
                 overflow = TextOverflow.Ellipsis,
                 style = TextStyle(
                     color = Color.White,
-                    fontSize = 34.sp,
+                    fontSize = 30.sp,
                     fontWeight = FontWeight.Bold,
                 ),
                 modifier = Modifier.padding(28.dp),
@@ -709,14 +731,13 @@ private fun RowScope.DetailPanel(
                 channel = it,
                 selectedIndex = state.selectedSourceIndex,
                 active = activeSources,
+                maxVisibleRows = 3,
             )
             Spacer(Modifier.height(16.dp))
             FocusableButton(text = "播放", onClick = { onChannelPlayed(it) })
             Spacer(Modifier.height(18.dp))
             HintText("频道层按右选择源，源层上下切源，OK 播放")
         }
-        Spacer(Modifier.height(18.dp))
-        FocusableButton(text = "添加订阅", onClick = onShowAddSource)
     }
 }
 
@@ -793,31 +814,39 @@ private fun SourceList(
     channel: Channel,
     selectedIndex: Int,
     active: Boolean,
+    maxVisibleRows: Int = 5,
 ) {
-    val firstVisibleSource = when {
-        channel.streamUrls.size <= 5 -> 0
-        selectedIndex <= 2 -> 0
-        selectedIndex >= channel.streamUrls.lastIndex - 2 -> channel.streamUrls.size - 5
-        else -> selectedIndex - 2
+    val listState = rememberLazyListState()
+    val visibleRows = channel.streamUrls.size
+        .coerceAtMost(maxVisibleRows)
+        .coerceAtLeast(1)
+
+    LaunchedEffect(channel.id, selectedIndex) {
+        if (channel.streamUrls.isNotEmpty()) {
+            listState.animateScrollToItem(selectedIndex)
+        }
     }
-    val visibleSources = channel.streamUrls
-        .drop(firstVisibleSource)
-        .take(5)
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionLabel("播放源 ${selectedIndex + 1}/${channel.streamUrls.size}")
-        visibleSources.forEachIndexed { offset, _ ->
-            val index = firstVisibleSource + offset
-            FocusableRow(
-                text = "源 ${index + 1}",
-                subtitle = channel.sourceNames.getOrNull(index) ?: channel.sourceName,
-                selected = index == selectedIndex,
-                active = active,
-                modifier = Modifier.width(260.dp),
-                onClick = {},
-            )
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height((visibleRows * 76).dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            itemsIndexed(channel.streamUrls) { index, _ ->
+                FocusableRow(
+                    text = "源 ${index + 1}",
+                    subtitle = channel.sourceNames.getOrNull(index) ?: channel.sourceName,
+                    selected = index == selectedIndex,
+                    active = active,
+                    onClick = {},
+                )
+            }
         }
-        if (firstVisibleSource > 0 || firstVisibleSource + visibleSources.size < channel.streamUrls.size) {
+        if (channel.streamUrls.size > visibleRows) {
             HintText("按上下查看更多源")
         }
     }
@@ -851,6 +880,7 @@ private fun SourcePickerOverlay(
                 channel = channel,
                 selectedIndex = selectedIndex,
                 active = true,
+                maxVisibleRows = 7,
             )
             Spacer(Modifier.height(18.dp))
             HintText("上下选择，OK 切换，左/返回关闭")

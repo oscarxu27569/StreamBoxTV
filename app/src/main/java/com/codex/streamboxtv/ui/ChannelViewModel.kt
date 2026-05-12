@@ -119,6 +119,15 @@ class ChannelViewModel(
         }
     }
 
+    fun selectSelectedChannelSourceOffset(delta: Int) {
+        _state.update { current ->
+            val channel = current.selectedChannel ?: return@update current
+            if (channel.streamUrls.isEmpty()) return@update current
+            val nextIndex = (current.selectedSourceIndex + delta).floorMod(channel.streamUrls.size)
+            current.copy(selectedSourceIndex = nextIndex)
+        }
+    }
+
     fun playSelectedSource() {
         val channel = _state.value.playingChannel ?: _state.value.selectedChannel ?: return
         play(channel, _state.value.selectedSourceIndex)
