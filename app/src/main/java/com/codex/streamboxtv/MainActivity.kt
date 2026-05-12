@@ -1,6 +1,8 @@
 package com.codex.streamboxtv
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
@@ -27,11 +29,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private val importSourceLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri ?: return@registerForActivityResult
-        runCatching {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        viewModel.addImportedSource(uri.toString())
+        handleImportedSourceUri(uri, persistable = true)
+    }
+
+    private val importSourceFallbackLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        handleImportedSourceUri(uri, persistable = false)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,9 +42,43 @@ class MainActivity : ComponentActivity() {
             StreamBoxApp(
                 viewModel = viewModel,
                 onImportSourceFile = {
-                    importSourceLauncher.launch(arrayOf("application/x-mpegURL", "audio/x-mpegurl", "text/*", "*/*"))
+                    launchImportSourceFile()
+                },
+                onExitApp = {
+                    finish()
                 },
             )
         }
+    }
+
+    private fun launchImportSourceFile() {
+        val mimeTypes = arrayOf("application/x-mpegURL", "audio/x-mpegurl", "text/*", "*/*")
+        try {
+            importSourceLauncher.launch(mimeTypes)
+        } catch (_: ActivityNotFoundException) {
+            launchFallbackImport()
+        } catch (_: IllegalStateException) {
+            launchFallbackImport()
+        }
+    }
+
+    private fun launchFallbackImport() {
+        try {
+            importSourceFallbackLauncher.launch("*/*")
+        } catch (_: ActivityNotFoundException) {
+            viewModel.showImportUnavailable()
+        } catch (_: IllegalStateException) {
+            viewModel.showImportUnavailable()
+        }
+    }
+
+    private fun handleImportedSourceUri(uri: Uri?, persistable: Boolean) {
+        uri ?: return
+        if (persistable) {
+            runCatching {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+        viewModel.addImportedSource(uri.toString())
     }
 }

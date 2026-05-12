@@ -78,6 +78,12 @@ class ChannelViewModel(
         )
     }
 
+    fun showImportUnavailable() {
+        _state.update {
+            it.copy(errorMessage = "当前系统没有可用的文件选择器。可以安装文件管理器，或用添加订阅输入 M3U/TXT 地址。")
+        }
+    }
+
     fun selectGroup(group: String) {
         _state.update { current ->
             val first = current.channelsFor(group).firstOrNull()

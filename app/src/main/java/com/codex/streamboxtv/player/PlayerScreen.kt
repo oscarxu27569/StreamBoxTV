@@ -28,6 +28,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,6 +53,7 @@ fun PlayerScreen(
     sourceCount: Int,
     playbackMessage: String?,
     onMenu: () -> Unit,
+    onExitRequest: () -> Unit,
     onSources: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -59,6 +61,7 @@ fun PlayerScreen(
     onPlaybackReady: () -> Unit,
 ) {
     val context = LocalContext.current
+    val rootView = LocalView.current
     var statusText by remember { mutableStateOf("正在缓冲...") }
     var overlayVisible by remember { mutableStateOf(true) }
     var overlayPulse by remember { mutableStateOf(0) }
@@ -89,6 +92,14 @@ fun PlayerScreen(
             statusText = "缓冲超时"
             overlayVisible = true
             overlayPulse += 1
+        }
+    }
+
+    DisposableEffect(rootView) {
+        val previousKeepScreenOn = rootView.keepScreenOn
+        rootView.keepScreenOn = true
+        onDispose {
+            rootView.keepScreenOn = previousKeepScreenOn
         }
     }
 
@@ -161,8 +172,12 @@ fun PlayerScreen(
                         onSources()
                         true
                     }
-                    Key.Back -> {
+                    Key.DirectionLeft, Key.Menu -> {
                         onMenu()
+                        true
+                    }
+                    Key.Back -> {
+                        onExitRequest()
                         true
                     }
                     Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> true
@@ -174,6 +189,7 @@ fun PlayerScreen(
             factory = {
                 PlayerView(it).apply {
                     useController = false
+                    keepScreenOn = true
                     this.player = player
                     setOnKeyListener { _, keyCode, event ->
                         if (event.action != AndroidKeyEvent.ACTION_DOWN) return@setOnKeyListener false
@@ -192,8 +208,12 @@ fun PlayerScreen(
                                 onSources()
                                 true
                             }
-                            AndroidKeyEvent.KEYCODE_BACK -> {
+                            AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
                                 onMenu()
+                                true
+                            }
+                            AndroidKeyEvent.KEYCODE_BACK -> {
+                                onExitRequest()
                                 true
                             }
                             AndroidKeyEvent.KEYCODE_MENU -> {
@@ -209,6 +229,7 @@ fun PlayerScreen(
                 }
             },
             update = {
+                it.keepScreenOn = true
                 it.player = player
             },
             modifier = Modifier.fillMaxSize(),

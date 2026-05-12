@@ -31,6 +31,19 @@ class M3uParser {
                         )
                         pendingInfo = null
                     }
+                    else -> {
+                        parsePlainTextChannel(line)?.let { (name, streamUrl) ->
+                            channels += Channel(
+                                id = stableId("${source.url}|$streamUrl"),
+                                name = name,
+                                group = "未分组",
+                                logoUrl = null,
+                                streamUrls = listOf(streamUrl),
+                                sourceNames = listOf(source.name),
+                            )
+                            pendingInfo = null
+                        }
+                    }
                 }
             }
 
@@ -50,6 +63,21 @@ class M3uParser {
         )
     }
 
+    private fun parsePlainTextChannel(line: String): Pair<String, String>? {
+        val urlMatch = streamUrlRegex.find(line) ?: return null
+        val streamUrl = urlMatch.value.trim().trimEnd(',', '，', ';')
+        if (!SafeStreamUrl.isAllowed(streamUrl)) return null
+
+        val name = line
+            .substring(0, urlMatch.range.first)
+            .trim()
+            .trimEnd(',', '，', '|', '$', ';')
+            .trim()
+            .ifBlank { streamUrl }
+
+        return name to streamUrl
+    }
+
     private fun stableId(input: String): String {
         val bytes = MessageDigest.getInstance("SHA-256")
             .digest(input.toByteArray())
@@ -64,5 +92,6 @@ class M3uParser {
 
     private companion object {
         val attributeRegex = Regex("""([A-Za-z0-9_-]+)="([^"]*)"""")
+        val streamUrlRegex = Regex("""(?i)(https?://\S+|rtsp://\S+|rtmp://\S+|udp://\S+)""")
     }
 }

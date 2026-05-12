@@ -56,14 +56,18 @@ import com.codex.streamboxtv.player.PlayerScreen
 fun StreamBoxApp(
     viewModel: ChannelViewModel,
     onImportSourceFile: () -> Unit,
+    onExitApp: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     var showAddSource by remember { mutableStateOf(false) }
     var sourceUrl by remember { mutableStateOf("") }
     var showMenu by remember { mutableStateOf(false) }
     var showSourcePicker by remember { mutableStateOf(false) }
+    var showExitConfirm by remember { mutableStateOf(false) }
+    var exitConfirmed by remember { mutableStateOf(true) }
     var menuLayer by remember { mutableStateOf(MenuLayer.Groups) }
     var addSourceSelected by remember { mutableStateOf(false) }
+    var addSourceActionIndex by remember { mutableStateOf(0) }
     var pendingDelete by remember { mutableStateOf<DeleteTarget?>(null) }
     var deleteConfirmed by remember { mutableStateOf(false) }
     var okPressedAt by remember { mutableStateOf<Long?>(null) }
@@ -75,26 +79,32 @@ fun StreamBoxApp(
         }
     }
 
-    BackHandler(enabled = showAddSource) {
+    BackHandler(enabled = showExitConfirm) {
+        showExitConfirm = false
+        exitConfirmed = true
+    }
+
+    BackHandler(enabled = showAddSource && !showExitConfirm) {
         showAddSource = false
     }
 
-    BackHandler(enabled = showSourcePicker && !showAddSource) {
+    BackHandler(enabled = showSourcePicker && !showAddSource && !showExitConfirm) {
         showSourcePicker = false
     }
 
-    BackHandler(enabled = showMenu && !showAddSource && !showSourcePicker) {
-        if (menuLayer == MenuLayer.Channels) {
+    BackHandler(enabled = showMenu && !showAddSource && !showSourcePicker && !showExitConfirm) {
+        if (menuLayer == MenuLayer.Sources) {
+            menuLayer = MenuLayer.Channels
+        } else if (menuLayer == MenuLayer.Channels) {
             menuLayer = MenuLayer.Groups
         } else {
             showMenu = false
         }
     }
 
-    BackHandler(enabled = state.playingChannel != null && !showMenu && !showAddSource && !showSourcePicker) {
-        showMenu = true
-        menuLayer = MenuLayer.Groups
-        addSourceSelected = false
+    BackHandler(enabled = state.playingChannel != null && !showMenu && !showAddSource && !showSourcePicker && !showExitConfirm) {
+        exitConfirmed = true
+        showExitConfirm = true
     }
 
     Box(
@@ -105,13 +115,76 @@ fun StreamBoxApp(
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (showAddSource) {
-                    return@onPreviewKeyEvent false
+                    return@onPreviewKeyEvent when (event.key) {
+                        Key.DirectionLeft, Key.DirectionUp -> {
+                            if (event.type == KeyEventType.KeyDown) {
+                                addSourceActionIndex = (addSourceActionIndex + 2) % 3
+                            }
+                            true
+                        }
+                        Key.DirectionRight, Key.DirectionDown -> {
+                            if (event.type == KeyEventType.KeyDown) {
+                                addSourceActionIndex = (addSourceActionIndex + 1) % 3
+                            }
+                            true
+                        }
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                            if (event.type == KeyEventType.KeyUp) {
+                                when (addSourceActionIndex) {
+                                    0 -> {
+                                        viewModel.addSource(sourceUrl)
+                                        sourceUrl = ""
+                                        showAddSource = false
+                                    }
+                                    1 -> {
+                                        showAddSource = false
+                                        onImportSourceFile()
+                                    }
+                                    else -> showAddSource = false
+                                }
+                            }
+                            true
+                        }
+                        Key.Back, Key.Menu -> {
+                            if (event.type == KeyEventType.KeyDown) showAddSource = false
+                            true
+                        }
+                        else -> false
+                    }
                 }
                 val isOkKey = event.key == Key.DirectionCenter ||
                     event.key == Key.Enter ||
                     event.key == Key.NumPadEnter
 
-                if (showSourcePicker) {
+                if (showExitConfirm) {
+                    when (event.key) {
+                        Key.DirectionLeft, Key.DirectionRight -> {
+                            if (event.type == KeyEventType.KeyDown) {
+                                exitConfirmed = !exitConfirmed
+                            }
+                            true
+                        }
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                            if (event.type == KeyEventType.KeyUp) {
+                                if (exitConfirmed) {
+                                    onExitApp()
+                                } else {
+                                    showExitConfirm = false
+                                    exitConfirmed = true
+                                }
+                            }
+                            true
+                        }
+                        Key.Back, Key.Menu -> {
+                            if (event.type == KeyEventType.KeyDown) {
+                                showExitConfirm = false
+                                exitConfirmed = true
+                            }
+                            true
+                        }
+                        else -> true
+                    }
+                } else if (showSourcePicker) {
                     when (event.key) {
                         Key.DirectionUp -> {
                             if (event.type == KeyEventType.KeyDown) viewModel.selectSourceOffset(-1)
@@ -188,6 +261,7 @@ fun StreamBoxApp(
 
                             if (menuLayer == MenuLayer.Groups) {
                                 if (addSourceSelected) {
+                                    addSourceActionIndex = 0
                                     showAddSource = true
                                 } else {
                                     menuLayer = MenuLayer.Channels
@@ -243,6 +317,7 @@ fun StreamBoxApp(
                             if (menuLayer == MenuLayer.Groups) {
                                 if (event.key == Key.DirectionRight) {
                                     if (addSourceSelected) {
+                                        addSourceActionIndex = 0
                                         showAddSource = true
                                     } else {
                                         menuLayer = MenuLayer.Channels
@@ -296,10 +371,15 @@ fun StreamBoxApp(
                             showSourcePicker = true
                             true
                         }
-                        Key.Back, Key.Menu -> {
+                        Key.DirectionLeft, Key.Menu -> {
                             showMenu = true
                             menuLayer = MenuLayer.Groups
                             addSourceSelected = false
+                            true
+                        }
+                        Key.Back -> {
+                            exitConfirmed = true
+                            showExitConfirm = true
                             true
                         }
                         else -> false
@@ -317,6 +397,10 @@ fun StreamBoxApp(
                 sourceCount = channel.streamUrls.size,
                 playbackMessage = state.playbackMessage,
                 onMenu = { showMenu = true },
+                onExitRequest = {
+                    exitConfirmed = true
+                    showExitConfirm = true
+                },
                 onSources = { showSourcePicker = true },
                 onPrevious = { viewModel.playOffset(-1) },
                 onNext = { viewModel.playOffset(1) },
@@ -325,7 +409,11 @@ fun StreamBoxApp(
             )
         }
 
-        if (showMenu || state.playingChannel == null) {
+        if (state.isLoading && state.playingChannel == null && !showMenu) {
+            InitialLoadingScreen()
+        }
+
+        if (showMenu || (state.playingChannel == null && !state.isLoading)) {
             ChannelBrowser(
                 state = state,
                 menuLayer = menuLayer,
@@ -333,6 +421,7 @@ fun StreamBoxApp(
                 onRefresh = viewModel::refresh,
                 onShowAddSource = {
                     addSourceSelected = true
+                    addSourceActionIndex = 0
                     showAddSource = true
                 },
                 onGroupSelected = {
@@ -351,6 +440,7 @@ fun StreamBoxApp(
         if (showAddSource) {
             AddSourceOverlay(
                 value = sourceUrl,
+                selectedActionIndex = addSourceActionIndex,
                 onValueChanged = { sourceUrl = it },
                 onSubmit = {
                     viewModel.addSource(sourceUrl)
@@ -385,6 +475,10 @@ fun StreamBoxApp(
                 confirmSelected = deleteConfirmed,
             )
         }
+
+        if (showExitConfirm) {
+            ExitConfirmOverlay(exitSelected = exitConfirmed)
+        }
     }
 }
 
@@ -397,6 +491,25 @@ private enum class MenuLayer {
 private sealed interface DeleteTarget {
     data class Group(val name: String) : DeleteTarget
     data class Channel(val name: String) : DeleteTarget
+}
+
+@Composable
+private fun InitialLoadingScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppColors.background),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            text = "正在加载频道...",
+            style = TextStyle(
+                color = AppColors.muted,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
+    }
 }
 
 @Composable
@@ -458,7 +571,7 @@ private fun Sidebar(
     }
 
     LaunchedEffect(selectedIndex) {
-        listState.animateScrollToItem(selectedIndex)
+        listState.scrollToItem(selectedIndex)
     }
 
     Column(
@@ -506,7 +619,7 @@ private fun ChannelList(
 
     LaunchedEffect(state.selectedGroup, selectedIndex) {
         if (state.visibleChannels.isNotEmpty()) {
-            listState.animateScrollToItem(selectedIndex)
+            listState.scrollToItem(selectedIndex)
         }
     }
 
@@ -610,6 +723,7 @@ private fun RowScope.DetailPanel(
 @Composable
 private fun AddSourceOverlay(
     value: String,
+    selectedActionIndex: Int,
     onValueChanged: (String) -> Unit,
     onSubmit: () -> Unit,
     onImportSourceFile: () -> Unit,
@@ -637,12 +751,41 @@ private fun AddSourceOverlay(
             )
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                FocusableButton(text = "保存", onClick = onSubmit)
-                FocusableButton(text = "导入文件", onClick = onImportSourceFile)
-                FocusableButton(text = "取消", onClick = onClose)
+                AddSourceActionButton(
+                    text = "保存",
+                    selected = selectedActionIndex == 0,
+                    onClick = onSubmit,
+                )
+                AddSourceActionButton(
+                    text = "导入文件",
+                    selected = selectedActionIndex == 1,
+                    onClick = onImportSourceFile,
+                )
+                AddSourceActionButton(
+                    text = "取消",
+                    selected = selectedActionIndex == 2,
+                    onClick = onClose,
+                )
             }
+            Spacer(Modifier.height(12.dp))
+            HintText("左右选择操作，OK 确认，返回关闭")
         }
     }
+}
+
+@Composable
+private fun AddSourceActionButton(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    FocusableRow(
+        text = text,
+        selected = selected,
+        active = true,
+        modifier = Modifier.width(180.dp),
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -742,6 +885,36 @@ private fun DeleteConfirmOverlay(
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 DialogChoice(text = "删除", selected = confirmSelected, danger = true)
                 DialogChoice(text = "取消", selected = !confirmSelected, danger = false)
+            }
+            Spacer(Modifier.height(12.dp))
+            HintText("左右选择，OK 确认，返回取消")
+        }
+    }
+}
+
+@Composable
+private fun ExitConfirmOverlay(exitSelected: Boolean) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xCC000000)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .width(560.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(AppColors.background)
+                .border(2.dp, AppColors.accent.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                .padding(28.dp),
+        ) {
+            Title("退出 StreamBox TV")
+            Spacer(Modifier.height(16.dp))
+            BodyText("确认退出程序？")
+            Spacer(Modifier.height(22.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                DialogChoice(text = "退出", selected = exitSelected, danger = true)
+                DialogChoice(text = "取消", selected = !exitSelected, danger = false)
             }
             Spacer(Modifier.height(12.dp))
             HintText("左右选择，OK 确认，返回取消")
