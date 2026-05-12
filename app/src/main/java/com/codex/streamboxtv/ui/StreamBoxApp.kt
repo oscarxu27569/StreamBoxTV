@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -71,6 +70,7 @@ fun StreamBoxApp(
     var addSourceActionIndex by remember { mutableStateOf(0) }
     var pendingDelete by remember { mutableStateOf<DeleteTarget?>(null) }
     var deleteConfirmed by remember { mutableStateOf(false) }
+    var suppressNextDeleteOkUp by remember { mutableStateOf(false) }
     var okPressedAt by remember { mutableStateOf<Long?>(null) }
     val focusRequester = remember { FocusRequester() }
 
@@ -218,6 +218,10 @@ fun StreamBoxApp(
                         }
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
                             if (event.type != KeyEventType.KeyUp) return@onPreviewKeyEvent true
+                            if (suppressNextDeleteOkUp) {
+                                suppressNextDeleteOkUp = false
+                                return@onPreviewKeyEvent true
+                            }
                             if (deleteConfirmed) {
                                 when (target) {
                                     is DeleteTarget.Group -> viewModel.deleteSelectedGroup()
@@ -226,12 +230,14 @@ fun StreamBoxApp(
                             }
                             pendingDelete = null
                             deleteConfirmed = false
+                            suppressNextDeleteOkUp = false
                             true
                         }
                         Key.Back, Key.Menu -> {
                             if (event.type == KeyEventType.KeyDown) {
                                 pendingDelete = null
                                 deleteConfirmed = false
+                                suppressNextDeleteOkUp = false
                             }
                             true
                         }
@@ -255,6 +261,7 @@ fun StreamBoxApp(
                                 }
                                 okPressedAt = null
                                 deleteConfirmed = false
+                                suppressNextDeleteOkUp = pendingDelete != null
                                 return@onPreviewKeyEvent pendingDelete != null
                             }
                         }
@@ -274,6 +281,7 @@ fun StreamBoxApp(
                                     else -> null
                                 }
                                 deleteConfirmed = false
+                                suppressNextDeleteOkUp = false
                                 return@onPreviewKeyEvent pendingDelete != null
                             }
 
@@ -363,7 +371,19 @@ fun StreamBoxApp(
                             }
                             true
                         }
-                        Key.Back, Key.Menu -> {
+                        Key.Menu -> {
+                            pendingDelete = when {
+                                menuLayer == MenuLayer.Groups && !addSourceSelected && state.selectedGroup != "全部" ->
+                                    DeleteTarget.Group(state.selectedGroup)
+                                (menuLayer == MenuLayer.Channels || menuLayer == MenuLayer.Sources) && state.selectedChannel != null ->
+                                    DeleteTarget.Channel(state.selectedChannel!!.name)
+                                else -> null
+                            }
+                            deleteConfirmed = false
+                            suppressNextDeleteOkUp = false
+                            pendingDelete != null
+                        }
+                        Key.Back -> {
                             if (menuLayer == MenuLayer.Sources) {
                                 menuLayer = MenuLayer.Channels
                                 true
@@ -691,7 +711,7 @@ private fun RowScope.DetailPanel(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(170.dp)
+                .height(if (activeSources) 120.dp else 170.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(AppColors.panel),
             contentAlignment = Alignment.Center,
@@ -702,7 +722,7 @@ private fun RowScope.DetailPanel(
                 overflow = TextOverflow.Ellipsis,
                 style = TextStyle(
                     color = Color.White,
-                    fontSize = 30.sp,
+                    fontSize = if (activeSources) 25.sp else 30.sp,
                     fontWeight = FontWeight.Bold,
                 ),
                 modifier = Modifier.padding(28.dp),
@@ -721,22 +741,37 @@ private fun RowScope.DetailPanel(
             }
         }
         channel?.let {
-            BodyText("分组：${it.group}")
-            Spacer(Modifier.height(8.dp))
-            BodyText("来源：${it.sourceName}")
-            Spacer(Modifier.height(8.dp))
-            BodyText("订阅数：${state.sourceCount}")
-            Spacer(Modifier.height(14.dp))
-            SourceList(
-                channel = it,
-                selectedIndex = state.selectedSourceIndex,
-                active = activeSources,
-                maxVisibleRows = 3,
-            )
-            Spacer(Modifier.height(16.dp))
-            FocusableButton(text = "播放", onClick = { onChannelPlayed(it) })
-            Spacer(Modifier.height(18.dp))
-            HintText("频道层按右选择源，源层上下切源，OK 播放")
+            if (activeSources) {
+                BodyText("分组：${it.group}")
+                Spacer(Modifier.height(8.dp))
+                BodyText("源数：${it.streamUrls.size}")
+                Spacer(Modifier.height(14.dp))
+                SourceList(
+                    channel = it,
+                    selectedIndex = state.selectedSourceIndex,
+                    active = true,
+                    maxVisibleRows = 5,
+                )
+                Spacer(Modifier.height(12.dp))
+                HintText("上下选择源，OK 播放，左返回频道")
+            } else {
+                BodyText("分组：${it.group}")
+                Spacer(Modifier.height(8.dp))
+                BodyText("来源：${it.sourceName}")
+                Spacer(Modifier.height(8.dp))
+                BodyText("订阅数：${state.sourceCount}")
+                Spacer(Modifier.height(14.dp))
+                SourceList(
+                    channel = it,
+                    selectedIndex = state.selectedSourceIndex,
+                    active = false,
+                    maxVisibleRows = 2,
+                )
+                Spacer(Modifier.height(16.dp))
+                FocusableButton(text = "播放", onClick = { onChannelPlayed(it) })
+                Spacer(Modifier.height(18.dp))
+                HintText("频道层按右选择源，源层上下切源，OK 播放")
+            }
         }
     }
 }
@@ -816,37 +851,32 @@ private fun SourceList(
     active: Boolean,
     maxVisibleRows: Int = 5,
 ) {
-    val listState = rememberLazyListState()
     val visibleRows = channel.streamUrls.size
         .coerceAtMost(maxVisibleRows)
         .coerceAtLeast(1)
-
-    LaunchedEffect(channel.id, selectedIndex) {
-        if (channel.streamUrls.isNotEmpty()) {
-            listState.animateScrollToItem(selectedIndex)
-        }
+    val firstVisibleSource = when {
+        channel.streamUrls.size <= visibleRows -> 0
+        selectedIndex <= visibleRows / 2 -> 0
+        selectedIndex >= channel.streamUrls.lastIndex - visibleRows / 2 -> channel.streamUrls.size - visibleRows
+        else -> selectedIndex - visibleRows / 2
     }
+    val visibleSources = channel.streamUrls
+        .drop(firstVisibleSource)
+        .take(visibleRows)
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SectionLabel("播放源 ${selectedIndex + 1}/${channel.streamUrls.size}")
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height((visibleRows * 76).dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            itemsIndexed(channel.streamUrls) { index, _ ->
-                FocusableRow(
-                    text = "源 ${index + 1}",
-                    subtitle = channel.sourceNames.getOrNull(index) ?: channel.sourceName,
-                    selected = index == selectedIndex,
-                    active = active,
-                    onClick = {},
-                )
-            }
+        visibleSources.forEachIndexed { offset, _ ->
+            val index = firstVisibleSource + offset
+            FocusableRow(
+                text = "源 ${index + 1}",
+                subtitle = channel.sourceNames.getOrNull(index) ?: channel.sourceName,
+                selected = index == selectedIndex,
+                active = active,
+                onClick = {},
+            )
         }
-        if (channel.streamUrls.size > visibleRows) {
+        if (firstVisibleSource > 0 || firstVisibleSource + visibleSources.size < channel.streamUrls.size) {
             HintText("按上下查看更多源")
         }
     }
@@ -880,7 +910,7 @@ private fun SourcePickerOverlay(
                 channel = channel,
                 selectedIndex = selectedIndex,
                 active = true,
-                maxVisibleRows = 7,
+                maxVisibleRows = 5,
             )
             Spacer(Modifier.height(18.dp))
             HintText("上下选择，OK 切换，左/返回关闭")
