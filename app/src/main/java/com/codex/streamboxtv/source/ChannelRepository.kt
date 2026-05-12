@@ -5,7 +5,10 @@ import android.net.Uri
 import com.codex.streamboxtv.data.Channel
 import com.codex.streamboxtv.data.SourceSubscription
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.security.MessageDigest
@@ -15,8 +18,9 @@ import java.util.concurrent.TimeUnit
 class ChannelRepository(
     private val context: Context? = null,
     private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build(),
@@ -38,11 +42,25 @@ class ChannelRepository(
         return withContext(Dispatchers.IO) {
             val channels = testChannels().toMutableList()
             val errors = mutableListOf<String>()
-            sources.forEach { source ->
-                load(source).fold(
-                    onSuccess = { channels += it },
-                    onFailure = { errors += "${source.name}: ${it.message.orEmpty()}" },
-                )
+            val sourceResults = sources
+                .map { source ->
+                    async {
+                        val result = withTimeoutOrNull(SOURCE_LOAD_TIMEOUT_MS) {
+                            load(source)
+                        }
+                        source to result
+                    }
+                }
+                .awaitAll()
+
+            sourceResults.forEach { (source, result) ->
+                when (result) {
+                    null -> errors += "${source.name}: 加载超时"
+                    else -> result.fold(
+                        onSuccess = { channels += it },
+                        onFailure = { errors += "${source.name}: ${it.message.orEmpty()}" },
+                    )
+                }
             }
 
             when {
@@ -120,5 +138,9 @@ class ChannelRepository(
         return resolver.openInputStream(Uri.parse(uri))?.use { input ->
             input.bufferedReader().readText()
         }.orEmpty()
+    }
+
+    private companion object {
+        const val SOURCE_LOAD_TIMEOUT_MS = 16_000L
     }
 }
