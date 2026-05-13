@@ -100,6 +100,18 @@ class ChannelRepository(
                 streamUrls = listOf("https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8"),
                 sourceNames = listOf("内置测试源"),
             ),
+            Channel(
+                id = "test-cctv5-direct",
+                name = "CCTV5 直连测试",
+                group = "测试",
+                logoUrl = null,
+                tvgId = null,
+                epgUrl = null,
+                catchupMode = null,
+                catchupSource = null,
+                streamUrls = listOf("http://69.30.245.50/live/cctv5.m3u8"),
+                sourceNames = listOf("手动测试源"),
+            ),
         )
     }
 

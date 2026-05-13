@@ -44,11 +44,14 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.KeyboardOptions
 import com.codex.streamboxtv.data.Channel
 import com.codex.streamboxtv.player.PlayerScreen
 
@@ -119,25 +122,26 @@ fun StreamBoxApp(
                     return@onPreviewKeyEvent when (event.key) {
                         Key.DirectionLeft, Key.DirectionUp -> {
                             if (event.type == KeyEventType.KeyDown) {
-                                addSourceActionIndex = (addSourceActionIndex + 2) % 3
+                                addSourceActionIndex = (addSourceActionIndex + 3) % 4
                             }
                             true
                         }
                         Key.DirectionRight, Key.DirectionDown -> {
                             if (event.type == KeyEventType.KeyDown) {
-                                addSourceActionIndex = (addSourceActionIndex + 1) % 3
+                                addSourceActionIndex = (addSourceActionIndex + 1) % 4
                             }
                             true
                         }
                         Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
                             if (event.type == KeyEventType.KeyUp) {
                                 when (addSourceActionIndex) {
-                                    0 -> {
+                                    0 -> Unit
+                                    1 -> {
                                         viewModel.addSource(sourceUrl)
                                         sourceUrl = ""
                                         showAddSource = false
                                     }
-                                    1 -> {
+                                    2 -> {
                                         showAddSource = false
                                         onImportSourceFile()
                                     }
@@ -813,28 +817,29 @@ private fun AddSourceOverlay(
             Spacer(Modifier.height(18.dp))
             SourceInput(
                 value = value,
+                selected = selectedActionIndex == 0,
                 onValueChanged = onValueChanged,
             )
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 AddSourceActionButton(
                     text = "保存",
-                    selected = selectedActionIndex == 0,
+                    selected = selectedActionIndex == 1,
                     onClick = onSubmit,
                 )
                 AddSourceActionButton(
                     text = "导入文件",
-                    selected = selectedActionIndex == 1,
+                    selected = selectedActionIndex == 2,
                     onClick = onImportSourceFile,
                 )
                 AddSourceActionButton(
                     text = "取消",
-                    selected = selectedActionIndex == 2,
+                    selected = selectedActionIndex == 3,
                     onClick = onClose,
                 )
             }
             Spacer(Modifier.height(12.dp))
-            HintText("左右选择操作，OK 确认，返回关闭")
+            HintText("方向键选择输入框或操作，输入框按 OK 弹出键盘，返回关闭")
         }
     }
 }
@@ -1022,20 +1027,41 @@ private fun DialogChoice(
 @Composable
 private fun SourceInput(
     value: String,
+    selected: Boolean,
     onValueChanged: (String) -> Unit,
 ) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(selected) {
+        if (selected) {
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
+
     Column {
         BasicTextField(
             value = value,
             onValueChange = onValueChanged,
             singleLine = true,
             textStyle = TextStyle(color = Color.White, fontSize = 18.sp),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
+                .focusRequester(focusRequester)
                 .clip(RoundedCornerShape(8.dp))
                 .background(AppColors.panel)
-                .border(2.dp, AppColors.accent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                .border(
+                    2.dp,
+                    if (selected) AppColors.accent else AppColors.accent.copy(alpha = 0.5f),
+                    RoundedCornerShape(8.dp),
+                )
+                .clickable {
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                }
                 .padding(horizontal = 14.dp, vertical = 13.dp),
         )
         Spacer(Modifier.height(8.dp))
