@@ -760,6 +760,16 @@ private fun RowScope.DetailPanel(
                 BodyText("来源：${it.sourceName}")
                 Spacer(Modifier.height(8.dp))
                 BodyText("订阅数：${state.sourceCount}")
+                Spacer(Modifier.height(8.dp))
+                BodyText(
+                    text = "节目单：${if (it.epgUrl != null && it.tvgId != null) "已配置" else "未配置"}",
+                    color = if (it.epgUrl != null && it.tvgId != null) AppColors.accent else AppColors.muted,
+                )
+                Spacer(Modifier.height(8.dp))
+                BodyText(
+                    text = "回看：${if (it.catchupSource != null) "支持" else "不支持"}",
+                    color = if (it.catchupSource != null) AppColors.accent else AppColors.muted,
+                )
                 Spacer(Modifier.height(14.dp))
                 SourceList(
                     channel = it,
@@ -799,7 +809,7 @@ private fun AddSourceOverlay(
                 .border(2.dp, AppColors.accent.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
                 .padding(28.dp),
         ) {
-            Title("添加 M3U 订阅")
+            Title("添加订阅")
             Spacer(Modifier.height(18.dp))
             SourceInput(
                 value = value,
@@ -1029,7 +1039,7 @@ private fun SourceInput(
                 .padding(horizontal = 14.dp, vertical = 13.dp),
         )
         Spacer(Modifier.height(8.dp))
-        HintText("支持 http/https 的 M3U 地址")
+        HintText("支持在线 M3U/TXT 地址，例如 https://example.com/live.m3u")
     }
 }
 

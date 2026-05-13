@@ -5,6 +5,10 @@ data class Channel(
     val name: String,
     val group: String,
     val logoUrl: String?,
+    val tvgId: String?,
+    val epgUrl: String?,
+    val catchupMode: String?,
+    val catchupSource: String?,
     val streamUrls: List<String>,
     val sourceNames: List<String>,
 ) {

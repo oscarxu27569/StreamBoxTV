@@ -8,12 +8,16 @@ class M3uParser {
     fun parse(content: String, source: SourceSubscription): List<Channel> {
         val channels = mutableListOf<Channel>()
         var pendingInfo: ExtInfo? = null
+        var playlistInfo = PlaylistInfo()
 
         content.lineSequence()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .forEach { line ->
                 when {
+                    line.startsWith("#EXTM3U", ignoreCase = true) -> {
+                        playlistInfo = parsePlaylistInfo(line)
+                    }
                     line.startsWith("#EXTINF", ignoreCase = true) -> {
                         pendingInfo = parseExtInfo(line)
                     }
@@ -26,6 +30,12 @@ class M3uParser {
                             name = name,
                             group = info?.groupTitle?.takeIf { it.isNotBlank() } ?: "未分组",
                             logoUrl = info?.logoUrl?.takeIf { SafeStreamUrl.isAllowed(it) },
+                            tvgId = info?.tvgId?.takeIf { it.isNotBlank() },
+                            epgUrl = playlistInfo.epgUrl?.takeIf { SafeStreamUrl.isAllowed(it) },
+                            catchupMode = info?.catchupMode?.takeIf { it.isNotBlank() }
+                                ?: playlistInfo.catchupMode?.takeIf { it.isNotBlank() },
+                            catchupSource = info?.catchupSource?.takeIf { it.isNotBlank() }
+                                ?: playlistInfo.catchupSource?.takeIf { it.isNotBlank() },
                             streamUrls = listOf(line),
                             sourceNames = listOf(source.name),
                         )
@@ -38,6 +48,10 @@ class M3uParser {
                                 name = name,
                                 group = "未分组",
                                 logoUrl = null,
+                                tvgId = null,
+                                epgUrl = playlistInfo.epgUrl?.takeIf { SafeStreamUrl.isAllowed(it) },
+                                catchupMode = playlistInfo.catchupMode?.takeIf { it.isNotBlank() },
+                                catchupSource = playlistInfo.catchupSource?.takeIf { it.isNotBlank() },
                                 streamUrls = listOf(streamUrl),
                                 sourceNames = listOf(source.name),
                             )
@@ -53,14 +67,30 @@ class M3uParser {
     private fun parseExtInfo(line: String): ExtInfo {
         val name = line.substringAfter(",", missingDelimiterValue = "")
             .trim()
-        val attributes = attributeRegex.findAll(line)
-            .associate { it.groupValues[1] to it.groupValues[2] }
+        val attributes = parseAttributes(line)
 
         return ExtInfo(
             name = name.ifBlank { attributes["tvg-name"].orEmpty() },
+            tvgId = attributes["tvg-id"].orEmpty(),
             groupTitle = attributes["group-title"].orEmpty(),
             logoUrl = attributes["tvg-logo"],
+            catchupMode = attributes["catchup"],
+            catchupSource = attributes["catchup-source"],
         )
+    }
+
+    private fun parsePlaylistInfo(line: String): PlaylistInfo {
+        val attributes = parseAttributes(line)
+        return PlaylistInfo(
+            epgUrl = attributes["x-tvg-url"],
+            catchupMode = attributes["catchup"],
+            catchupSource = attributes["catchup-source"],
+        )
+    }
+
+    private fun parseAttributes(line: String): Map<String, String> {
+        return attributeRegex.findAll(line)
+            .associate { it.groupValues[1] to it.groupValues[2] }
     }
 
     private fun parsePlainTextChannel(line: String): Pair<String, String>? {
@@ -86,8 +116,17 @@ class M3uParser {
 
     private data class ExtInfo(
         val name: String,
+        val tvgId: String,
         val groupTitle: String,
         val logoUrl: String?,
+        val catchupMode: String?,
+        val catchupSource: String?,
+    )
+
+    private data class PlaylistInfo(
+        val epgUrl: String? = null,
+        val catchupMode: String? = null,
+        val catchupSource: String? = null,
     )
 
     private companion object {
