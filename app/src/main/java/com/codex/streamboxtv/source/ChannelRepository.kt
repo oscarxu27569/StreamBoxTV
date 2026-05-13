@@ -31,6 +31,7 @@ class ChannelRepository(
             runCatching {
                 val body = when (Uri.parse(source.url).scheme) {
                     "content" -> readContentUri(source.url)
+                    "asset" -> readAsset(source.url)
                     else -> downloadSubscription(source)
                 }
                 parser.parse(body, source)
@@ -138,6 +139,19 @@ class ChannelRepository(
         return resolver.openInputStream(Uri.parse(uri))?.use { input ->
             input.bufferedReader().readText()
         }.orEmpty()
+    }
+
+    private fun readAsset(uri: String): String {
+        val assetManager = context?.assets
+            ?: error("当前环境无法读取内置订阅文件")
+        val assetName = Uri.parse(uri).path
+            ?.removePrefix("/")
+            ?.takeIf { it.isNotBlank() }
+            ?: error("内置订阅文件路径无效")
+
+        return assetManager.open(assetName).use { input ->
+            input.bufferedReader().readText()
+        }
     }
 
     private companion object {
